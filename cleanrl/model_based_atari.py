@@ -389,10 +389,10 @@ class Agent:
         r_mse = (r_pred - rewards) ** 2
         reward_loss = (rho[:, None] * ((1.0 - dones) * r_mse).mean(dim=1)).mean()
 
-        if self.cfg.consistency_coef == "mse":
+        if self.cfg.consistency_loss == "mse":
             # temporal consistency (MSE)
             tc = ((zs[1:] - z_tar) ** 2).mean(dim=-1)  # [T,B]
-        elif self.cfg.consistency_coef == "cosine":
+        elif self.cfg.consistency_loss == "cosine":
             # temporal consistency (cosine similarity)
             tc = -nn.CosineSimilarity(dim=-1, eps=1e-6)(zs[1:], z_tar)
         else:
