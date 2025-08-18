@@ -23,13 +23,14 @@ from cleanrl_utils.atari_wrappers import (
     NoopResetEnv,
 )
 from cleanrl_utils.buffers import ReplayBuffer, ReplayBufferSamples
-from utils.logging import (
-    print_eval_summary,
-    print_header,
-    print_metrics,
-    print_section,
-    print_success,
-)
+
+# from utils.logging import (
+#     print_eval_summary,
+#     print_header,
+#     print_metrics,
+#     print_section,
+#     print_success,
+# )
 
 
 @dataclass
@@ -290,12 +291,12 @@ class Agent:
 # if __name__ == "__main__":
 def main(cfg):
     """Main training function."""
-    print_header("🚀 JAX-RL Training")
+    # print_header("🚀 JAX-RL Training")
 
     device = torch.device("cuda" if torch.cuda.is_available() and cfg.cuda else "cpu")
 
     # Print configuration
-    print_section("Configuration")
+    # print_section("Configuration")
     print(f"  Environment: {cfg.env_id}")
     print(f"  Agent: SAC")
     print(f"  Total steps: {cfg.total_timesteps}")
@@ -311,7 +312,7 @@ def main(cfg):
         import wandb
 
         # Initialize Wandb
-        print_section("Initializing Wandb")
+        # print_section("Initializing Wandb")
 
         wandb_run = wandb.init(
             project=cfg.wandb_project_name,
@@ -322,7 +323,7 @@ def main(cfg):
             monitor_gym=True,
             save_code=True,
         )
-        print_success(f"Wandb run: {wandb_run.name}")
+        # print_success(f"Wandb run: {wandb_run.name}")
     writer = SummaryWriter(f"runs/{run_name}")
     writer.add_text(
         "hyperparameters",
@@ -336,12 +337,12 @@ def main(cfg):
     torch.backends.cudnn.deterministic = cfg.torch_deterministic
 
     # Create environment
-    print_section("Creating Environment")
+    # print_section("Creating Environment")
     envs = gym.vector.SyncVectorEnv([make_env(cfg.env_id, cfg.seed, 0, cfg.capture_video, run_name)])
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
     # Create agent
-    print_section("Creating Agent")
+    # print_section("Creating Agent")
     agent = Agent(cfg, envs=envs, device=device)
 
     rb = ReplayBuffer(
