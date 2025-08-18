@@ -25,6 +25,7 @@ dependencies = [
     "tyro>=0.5.10",
     "termcolor>=2.0",
     "nvitop",
+    "tensordict",
 ]
 
 [project.optional-dependencies]

@@ -3,7 +3,7 @@ import os
 import random
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, List
 
 import gymnasium as gym
 import numpy as np
@@ -12,9 +12,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import tyro
+from tensordict import TensorDict
 from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 
+import utils.helper as h
 from cleanrl_utils.atari_wrappers import (
     ClipRewardEnv,
     EpisodicLifeEnv,
@@ -39,6 +41,18 @@ class AgentConfig:
     """the discount factor gamma"""
     tau: float = 1.0
     """target smoothing coefficient (default: 1)"""
+
+    mlp_dims: List[int] = [512, 512]
+    """MLP dims for actor/critic/reward"""
+    latent_dim: int = 64
+    """Size of latent space"""
+    horizon: int = 5
+    """Horizon used for representation learning"""
+    use_delta: bool = False
+    """Predict change in latent or next latent? i.e. next_z = z + f(z, a) else next_z = f(z, a)"""
+
+    compile: bool = False
+    """If True try to compile all NNs"""
 
 
 @dataclass
@@ -123,6 +137,125 @@ def layer_init(layer, bias_const=0.0):
     return layer
 
 
+class Encoder(nn.Module):
+    def __init__(self, envs, cfg: AgentConfig):
+        super().__init__()
+        obs_shape = envs.single_observation_space.shape
+        self.conv = nn.Sequential(
+            layer_init(nn.Conv2d(obs_shape[0], 32, kernel_size=8, stride=4)),
+            nn.ReLU(),
+            layer_init(nn.Conv2d(32, 64, kernel_size=4, stride=2)),
+            nn.ReLU(),
+            layer_init(nn.Conv2d(64, 64, kernel_size=3, stride=1)),
+            nn.Flatten(),
+        )
+
+        with torch.inference_mode():
+            output_dim = self.conv(torch.zeros(1, *obs_shape)).shape[1]
+
+        self.fc1 = layer_init(nn.Linear(output_dim, cfg.latent_dim))
+
+    def forward(self, x):
+        x = F.relu(self.conv(x / 255.0))
+        return F.relu(self.fc1(x))
+
+
+class WorldModel(nn.Module):
+    def __init__(self, envs, cfg: AgentConfig):
+        super().__init__()
+        obs_shape = envs.single_observation_space.shape
+        act_dim = envs.single_action_space.n
+
+        self._encoder = Encoder(cfg=cfg, envs=envs)
+
+        self._trans = h.mlp(self.cfg.latent_dim + act_dim, cfg.mlp_dims, cfg.latent_dim)
+        if cfg.compile:
+            self._trans = torch.compile(self._trans, mode="default")
+
+        self._reward = h.mlp(self.cfg.latent_dim + act_dim, cfg.mlp_dims, 1)
+        if cfg.compile:
+            self._reward = torch.compile(self._reward, mode="default")
+
+    def encode(self, obs):
+        x = obs / 255.0
+        z = self._encoder(x)
+        return z
+
+    def trans(self, z, a):
+        za = torch.concat([z, a], -1)
+        delta_z = self._trans(za)
+        next_z = z + delta_z if self.cfg.use_delta else delta_z
+        return next_z
+
+    def loss(self, batch: ReplayBufferSamples):
+        tc_loss = torch.zeros(1).to(self.cfg.device)
+        reward_loss = torch.zeros(1).to(self.cfg.device)
+
+        ##### Create targets #####
+        with torch.no_grad():
+            next_obs = batch.next_observations
+            zs_tar = self.encode(next_obs)
+
+        # z = self.encode(batch.observations[0])
+        zs = [self.encode(batch.observations[0])]
+        for t in range(self.cfg.horizon):
+            # dones = torch.where(terminateds_or_dones[t], dones, batch.dones[t])
+            # terminateds_or_dones[t] = torch.logical_or(
+            #     terminateds_or_dones[t], torch.logical_or(dones, batch.terminateds[t])
+            # )
+
+            # Predict next latent
+            zs.append(self.trans(z=zs[t], a=batch.actions[t]))
+
+        zs = torch.stack(zs, 0)
+
+        rho = torch.tensor([self.cfg.rho**t for t in range(self.cfg.horizon)]).to(self.cfg.device)
+        dones = batch.dones.to(torch.int)
+
+        ##### (Optional) Reward prediction loss #####
+        r_tar = batch.rewards  # Reward target
+        r_pred = self.reward(z=zs[:-1], a=batch.actions)[..., 0]
+        assert r_pred.ndim == 2 and r_tar.ndim == 2
+        _reward_loss = (r_pred - r_tar) ** 2
+        _rho_reward_loss = rho * torch.mean((1 - dones) * _reward_loss, -1)
+        reward_loss = torch.mean(_rho_reward_loss)
+
+        if self.cfg.consistency_loss == "mse":
+            """Mean squared error"""
+            _tc_loss = torch.mean((zs[1:] - zs_tar) ** 2, dim=-1)
+        else:
+            raise NotImplementedError
+        _rho_tc_loss = rho * torch.mean((1 - dones) * _tc_loss, -1)
+        tc_loss = torch.mean(_rho_tc_loss)
+
+        loss = self.cfg.consistency_coef * tc_loss + self.cfg.reward_coef * reward_loss
+
+        info = {
+            "loss": loss,
+            "tc_loss": tc_loss,
+            "reward_loss": reward_loss,
+            "z_min": torch.min(zs),
+            "z_max": torch.max(zs),
+            "z_mean": torch.mean(zs.to(torch.float)),
+            "z_median": torch.median(zs),
+            "r_min": r_pred.min(),
+            "r_max": r_pred.max(),
+            "r_mean": r_pred.mean(),
+        }
+        return loss, info
+
+    def forward(self, x):
+        x = F.relu(self.conv(x / 255.0))
+        x = F.relu(self.fc1(x))
+        q_vals = self.fc_q(x)
+        return q_vals
+
+
+class Agent(nn.Module):
+    def __init__(self, envs, cfg: AgentConfig):
+        self.model = WorldModel(envs, cfg=cfg)
+
+
 # ALGO LOGIC: initialize agent here:
 # NOTE: Sharing a CNN encoder between Actor and Critics is not recommended for SAC without stopping actor gradients
 # See the SAC+AE paper https://arxiv.org/abs/1910.01741 for more info
@@ -154,39 +287,25 @@ class SoftQNetwork(nn.Module):
 
 
 class Actor(nn.Module):
-    def __init__(self, envs):
+    def __init__(self, envs, cfg: AgentConfig):
         super().__init__()
         obs_shape = envs.single_observation_space.shape
-        self.conv = nn.Sequential(
-            layer_init(nn.Conv2d(obs_shape[0], 32, kernel_size=8, stride=4)),
-            nn.ReLU(),
-            layer_init(nn.Conv2d(32, 64, kernel_size=4, stride=2)),
-            nn.ReLU(),
-            layer_init(nn.Conv2d(64, 64, kernel_size=3, stride=1)),
-            nn.Flatten(),
-        )
+        act_dim = envs.single_action_space.n
 
-        with torch.inference_mode():
-            output_dim = self.conv(torch.zeros(1, *obs_shape)).shape[1]
+        self.mlp = h.mlp(cfg.latent_dim, cfg.mlp_dims, act_dim)
 
-        self.fc1 = layer_init(nn.Linear(output_dim, 512))
-        self.fc_logits = layer_init(nn.Linear(512, envs.single_action_space.n))
-
-    def forward(self, x):
-        x = F.relu(self.conv(x))
-        x = F.relu(self.fc1(x))
-        logits = self.fc_logits(x)
-
+    def forward(self, z):
+        logits = self.fc_logits(z)
         return logits
 
-    def get_action(self, x):
-        logits = self(x / 255.0)
+    def get_action(self, z):
+        logits = self.forward(z)
         policy_dist = Categorical(logits=logits)
-        action = policy_dist.sample()
+        action = policy_dist.rsample()
         # Action probabilities for calculating the adapted soft-Q loss
         action_probs = policy_dist.probs
         log_prob = F.log_softmax(logits, dim=1)
-        return action, log_prob, action_probs
+        return TensorDict({"action": action, "log_prob": log_prob, "action_probs": action_probs}, device=z.device)
 
 
 class Agent:
