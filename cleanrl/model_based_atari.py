@@ -23,8 +23,13 @@ from cleanrl_utils.atari_wrappers import (
     NoopResetEnv,
 )
 from cleanrl_utils.buffers import ReplayBuffer, ReplayBufferSamples
-
-# from utils.logging import print_header, print_section, print_success, print_metrics, print_eval_summary, print_metrics
+from utils.logging import (
+    print_eval_summary,
+    print_header,
+    print_metrics,
+    print_section,
+    print_success,
+)
 
 
 @dataclass
