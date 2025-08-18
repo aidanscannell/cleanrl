@@ -399,7 +399,7 @@ def main(cfg):
         if global_step > cfg.learning_starts:
             if global_step % cfg.update_frequency == 0:
                 batch = rb.sample(cfg.batch_size)
-                metrics.update(agent.update_step(batch, global_step=global_step))
+                info = agent.update_step(batch, global_step=global_step)
 
             if global_step % cfg.log_frequency == 0:
                 info.update({"charts/SPS": int(global_step / (time.time() - start_time))})
