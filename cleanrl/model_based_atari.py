@@ -486,7 +486,7 @@ class Agent:
         return actor_loss, info
 
     def get_action(self, x):
-        z = self.model.encode(x)
+        z = self.model.encode(x.to(self.device))
         return self.actor.get_action(z)
 
 
