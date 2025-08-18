@@ -280,7 +280,7 @@ class Agent:
         self.act_dim = envs.single_action_space.n
         self.device = device
 
-        self.model = WorldModel(envs, cfg=cfg)
+        self.model = WorldModel(envs, cfg=cfg).to(device)
         self.actor = Actor(envs, cfg).to(device)
         self.q1 = SoftQNetwork(envs, cfg).to(device)
         self.q2 = SoftQNetwork(envs, cfg).to(device)
