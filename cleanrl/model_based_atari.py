@@ -225,6 +225,7 @@ class WorldModel(nn.Module):
         return zs
 
     def encode(self, obs):
+        enc_fn = self._encoder
         x = obs / 255.0
         if x.ndim == 5:  # [T, B, C, H, W]
             t, b = x.shape[:2]
