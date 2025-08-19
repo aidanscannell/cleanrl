@@ -168,7 +168,6 @@ class Actor(nn.Module):
         # Action probabilities for calculating the adapted soft-Q loss
         action_probs = policy_dist.probs
         log_prob = F.log_softmax(logits, dim=1)
-        breakpoint()
         return action, log_prob, action_probs
 
 
@@ -272,9 +271,8 @@ if __name__ == "__main__":
         if global_step > args.learning_starts:
             if global_step % args.update_frequency == 0:
                 data = rb.sample(args.batch_size)
-                batch = rb.sample(args.batch_size, n_step=3)
+                # batch = rb.sample(args.batch_size, n_step=3)
 
-                breakpoint()
                 # CRITIC training
                 with torch.no_grad():
                     _, next_state_log_pi, next_state_action_probs = actor.get_action(data.next_observations)
