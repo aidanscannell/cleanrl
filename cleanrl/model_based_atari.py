@@ -242,7 +242,7 @@ class WorldModel(nn.Module):
             raise ValueError(f"Unexpected obs shape {obs.shape}")
         return z
 
-    def trans(self, z, a):
+    def trans(self, z, a) -> torch.Tensor:
         za = torch.concat([z, a], -1)
         delta_z = self._trans(za)
         next_z = z + delta_z if self.cfg.use_delta else delta_z
@@ -398,7 +398,7 @@ class Agent:
             zs.append(self.model.trans(zs[t], a_oh[t]))
         zs = torch.stack(zs, dim=0)  # [T+1,B,Z]
 
-        rho = torch.tensor([self.cfg.horizon and self.cfg.rho**t for t in range(T)], device=device, dtype=torch.float32)
+        rho = self.cfg.rho ** torch.arange(T, device=device, dtype=torch.float32)  # [T]
         dones = batch.dones[:T].to(device).float()  # [T,B]
         rewards = batch.rewards[:T].to(device).float()
 
@@ -407,6 +407,7 @@ class Agent:
         r_mse = (r_pred - rewards) ** 2
         reward_loss = (rho[:, None] * ((1.0 - dones) * r_mse).mean(dim=1)).mean()
 
+        # calculate the temporal consistency loss in projected space
         if self.cfg.use_projection:
             zs_proj = self.model._proj(zs)
             z_tar_proj = self.model._proj(z_tar)
