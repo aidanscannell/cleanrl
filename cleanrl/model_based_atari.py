@@ -234,6 +234,10 @@ class WorldModel(nn.Module):
             z = rearrange(z, "(t b) d -> t b d", t=t, b=b)
         elif x.ndim == 4:
             z = enc_fn(x)
+        elif x.ndim == 3:
+            x = rearrange(x, "c h w -> 1 c h w")
+            z = enc_fn(x)
+            z = rearrange(z, "1 d -> d")
         else:
             raise ValueError(f"Unexpected obs shape {obs.shape}")
         return z
