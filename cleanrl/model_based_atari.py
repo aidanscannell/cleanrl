@@ -602,7 +602,7 @@ def main(cfg):
             actions = agent.get_action(torch.Tensor(obs).to(device))
 
             # Step the vector env
-            obs, reward, terminated, truncated, info = eval_envs.step(actions["actions"].numpy())
+            obs, reward, terminated, truncated, info = eval_envs.step(actions["actions"].cpu().numpy())
             done = np.logical_or(terminated, truncated)
 
             # Accumulate rewards/lengths only for not-yet-finished envs
