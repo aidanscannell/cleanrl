@@ -79,7 +79,7 @@ class AgentConfig:
     """Weight the reward loss by reward_coef"""
     rho: float = 0.9
     """Discount factor for representation learning"""
-    consistency_loss: str = "mse"  # "cross-entropy", "mse", "cosine"
+    consistency_loss: str = "mse"  # "cross-entropy", "mse", "cosine", "infonce"
     """Which loss function to use for consistency loss?"""
 
     use_tar_enc: bool = False
