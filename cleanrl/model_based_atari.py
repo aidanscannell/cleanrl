@@ -633,7 +633,7 @@ def main(cfg):
             writer.add_scalar(f"eval/{key}", value, global_step)
 
         print(
-            f"[EVAL] Return: {results['episodic_return']:.2f} ± {results['episodic_return_std']:.2f} | "
+            f"[EVAL] Step: {global_step} | Return: {results['episodic_return']:.2f} ± {results['episodic_return_std']:.2f} | "
             f"Length: {int(results['episodic_length'])} ± {int(results['episodic_length_std'])}"
         )
         return results
