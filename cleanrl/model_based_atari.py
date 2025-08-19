@@ -81,6 +81,8 @@ class AgentConfig:
     consistency_loss: str = "mse"  # "cross-entropy", "mse", "cosine"
     """Which loss function to use for consistency loss?"""
 
+    use_projection: bool = False
+    """If true, calculate the loss in a projected space"""
     use_horizon_as_negatives: bool = False
 
     use_delta: bool = False
@@ -190,6 +192,8 @@ class WorldModel(nn.Module):
         self._encoder = Encoder(cfg=cfg, envs=envs)
         self._trans = mlp(self.cfg.latent_dim + act_dim, cfg.mlp_dims, cfg.latent_dim)
         self._reward = mlp(self.cfg.latent_dim + act_dim, cfg.mlp_dims, 1)
+        if cfg.use_projection:
+            self._proj = mlp(self.cfg.latent_dim, cfg.mlp_dims, self.cfg.latent_dim)
 
         if cfg.compile:
             self._encoder = torch.compile(self._encoder, mode="default")
@@ -393,28 +397,27 @@ class Agent:
         r_mse = (r_pred - rewards) ** 2
         reward_loss = (rho[:, None] * ((1.0 - dones) * r_mse).mean(dim=1)).mean()
 
+        if self.cfg.use_projection:
+            zs_proj = self.model._proj(zs)
+            z_tar_proj = self.model._proj(z_tar)
+        else:
+            zs_proj = zs
+            z_tar_proj = z_tar
         if self.cfg.consistency_loss == "mse":
             # temporal consistency (MSE)
-            tc = ((zs[1:] - z_tar) ** 2).mean(dim=-1)  # [T,B]
+            tc = ((zs_proj[1:] - z_tar_proj) ** 2).mean(dim=-1)  # [T,B]
             tc_loss = (rho[:, None] * ((1.0 - dones) * tc).mean(dim=1)).mean()
         elif self.cfg.consistency_loss == "cosine":
             # temporal consistency (cosine similarity)
-            tc = -nn.CosineSimilarity(dim=-1, eps=1e-6)(zs[1:], z_tar)
+            tc = -nn.CosineSimilarity(dim=-1, eps=1e-6)(zs_proj[1:], z_tar_proj)
             tc_loss = (rho[:, None] * ((1.0 - dones) * tc).mean(dim=1)).mean()
         elif self.cfg.consistency_loss == "infonce":
-            # Get zs from encoder at t+1
-            with torch.no_grad():
-                zs_enc = self.model.encode(batch.next_observations)
-
-            # Get zs from dynamics at t+1
-            zs_dyn = zs[1:]
-
             if self.cfg.use_horizon_as_negatives:
-                zs_enc = rearrange(zs_enc, "h b d -> (h b) d")
-                zs_dyn = rearrange(zs_dyn, "h b d -> (h b) d")
+                zs_enc = rearrange(z_tar_proj, "h b d -> (h b) d")
+                zs_dyn = rearrange(zs_proj[1:], "h b d -> (h b) d")
                 tc = InfoNCE()(zs_dyn, zs_enc)
             else:
-                tc = torch.vmap(InfoNCE())(zs_dyn, zs_enc)
+                tc = torch.vmap(InfoNCE())(zs_proj[1:], z_tar_proj)
                 # TODO does this need to consider dones?
             tc_loss = (tc * rho).mean()
         else:
