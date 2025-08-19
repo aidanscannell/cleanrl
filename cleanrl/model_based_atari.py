@@ -18,7 +18,7 @@ from tensordict import TensorDict
 from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 
-# import cleanrl.utils.helper as h
+from cleanrl.utils.evaluate import evaluate
 from cleanrl.utils.layers import mlp
 from cleanrl_utils.atari_wrappers import (
     ClipRewardEnv,
@@ -581,62 +581,17 @@ def main(cfg):
     envs = gym.vector.SyncVectorEnv([make_env(cfg.env_id, cfg.seed, 0, False, cfg.run_name)])
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
-    eval_envs = gym.vector.SyncVectorEnv(
-        [make_env(cfg.env_id, cfg.seed, i, cfg.capture_video, cfg.run_name) for i in range(cfg.num_eval_episodes)]
-    )
-
-    def evaluate(agent, eval_envs, global_step: int):
-        obs, info = eval_envs.reset()
-
-        # num_envs = getattr(eval_envs, "num_envs", len(getattr(eval_envs, "env_fns", [])) or 1)
-        episode_returns = np.zeros(cfg.num_eval_episodes, dtype=np.float64)
-        episode_lengths = np.zeros(cfg.num_eval_episodes, dtype=np.int32)
-        done_flag = np.zeros(cfg.num_eval_episodes, dtype=bool)
-
-        finished_returns = []
-        finished_lengths = []
-
-        # ---- rollout: one episode per env --------------------------------------
-        while not np.all(done_flag):
-            # Get greedy/deterministic actions for all active envs
-            actions = agent.get_action(torch.Tensor(obs).to(device))
-
-            # Step the vector env
-            obs, reward, terminated, truncated, info = eval_envs.step(actions["actions"].cpu().numpy())
-            done = np.logical_or(terminated, truncated)
-
-            # Accumulate rewards/lengths only for not-yet-finished envs
-            episode_returns += reward * (~done_flag)
-            episode_lengths += (~done_flag).astype(np.int32)
-
-            # For envs that just finished now, store and mark done
-            just_finished = (~done_flag) & done
-            if np.any(just_finished):
-                finished_returns.extend(episode_returns[just_finished].tolist())
-                finished_lengths.extend(episode_lengths[just_finished].tolist())
-                done_flag[just_finished] = True
-
-        # ---- summarize ----------------------------------------------------------
-        finished_returns = np.asarray(finished_returns, dtype=np.float64)
-        finished_lengths = np.asarray(finished_lengths, dtype=np.int32)
-
-        results = {
-            "episodic_return": float(finished_returns.mean()) if len(finished_returns) else 0.0,
-            "episodic_return_std": float(finished_returns.std(ddof=0)) if len(finished_returns) else 0.0,
-            "episodic_length": float(finished_lengths.mean()) if len(finished_lengths) else 0.0,
-            "episodic_length_std": float(finished_lengths.std(ddof=0)) if len(finished_lengths) else 0.0,
-            # "episodic_return": finished_returns.tolist(),
-            # "episode_length": finished_lengths.tolist(),
-            "global_step": global_step,
-        }
-        for key, value in results.items():
-            writer.add_scalar(f"eval/{key}", value, global_step)
-
-        print(
-            f"[EVAL] Step: {global_step} | Return: {results['episodic_return']:.2f} ± {results['episodic_return_std']:.2f} | "
-            f"Length: {int(results['episodic_length'])} ± {int(results['episodic_length_std'])}"
+    # eval_envs = gym.vector.AsyncVectorEnv(
+    #         [make_env(cfg.env_id, cfg.seed, i, cfg.capture_video, cfg.run_name) for i in range(cfg.num_eval_episodes)]
+    #     )
+    try:
+        eval_envs = gym.vector.AsyncVectorEnv(
+            [make_env(cfg.env_id, cfg.seed, i, cfg.capture_video, cfg.run_name) for i in range(cfg.num_eval_episodes)]
         )
-        return results
+    except:
+        eval_envs = gym.vector.SyncVectorEnv(
+            [make_env(cfg.env_id, cfg.seed, i, cfg.capture_video, cfg.run_name) for i in range(cfg.num_eval_episodes)]
+        )
 
     # Create agent
     # print_section("Creating Agent")
@@ -652,7 +607,7 @@ def main(cfg):
     start_time = time.time()
 
     # Evaluate initial agent
-    evaluate(agent, eval_envs, global_step=0)
+    evaluate(cfg, agent, eval_envs, global_step=0, writer=writer)
 
     # TRY NOT TO MODIFY: start the game
     obs, _ = envs.reset(seed=cfg.seed)
@@ -673,13 +628,6 @@ def main(cfg):
                 # Skip the envs that are not done
                 if "episode" not in info:
                     continue
-                # print_metrics(global_step, info, eval_mode=False)
-                # print_eval_summary(global_step, length=info["episode"]["l"].item(), reward=info["episode"]["r"].item(), success=None)
-                # metrics = {
-                #     "charts/episodic_return": info["episode"]["r"],
-                #     "charts/episodic_length": info["episode"]["l"],
-                # }
-                # writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
                 writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
                 writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
                 print(
@@ -711,7 +659,7 @@ def main(cfg):
                 # print_metrics(global_step, info, eval_mode=False)
 
             if global_step % cfg.eval_frequency == 0:
-                evaluate(agent, eval_envs, global_step=global_step)
+                evaluate(cfg, agent, eval_envs, global_step=global_step, writer=writer)
 
     # Clean up
     envs.close()
