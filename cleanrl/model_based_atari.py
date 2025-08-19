@@ -599,7 +599,7 @@ def main(cfg):
         # ---- rollout: one episode per env --------------------------------------
         while not np.all(done_flag):
             # Get greedy/deterministic actions for all active envs
-            actions = agent.get_action(torch.Tensor(obs, device=device))
+            actions = agent.get_action(torch.Tensor(obs).to(device))
 
             # Step the vector env
             obs, reward, terminated, truncated, info = eval_envs.step(actions["actions"].numpy())
