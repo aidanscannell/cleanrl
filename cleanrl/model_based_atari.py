@@ -226,10 +226,15 @@ class WorldModel(nn.Module):
 
     def encode(self, obs):
         x = obs / 255.0
-        if obs.ndim == 5:
-            z = torch.vmap(self._encoder, in_dims=0, randomness="same")(x)
-        elif obs.ndim == 4:
-            z = self._encoder(x)
+        if x.ndim == 5:  # [T, B, C, H, W]
+            t, b = x.shape[:2]
+            x = rearrange(x, "t b c h w -> (t b) c h w")
+            z = enc_fn(x)
+            z = rearrange(z, "(t b) d -> t b d", t=t, b=b)
+        elif x.ndim == 4:
+            z = enc_fn(x)
+        else:
+            raise ValueError(f"Unexpected obs shape {obs.shape}")
         return z
 
     def trans(self, z, a):
