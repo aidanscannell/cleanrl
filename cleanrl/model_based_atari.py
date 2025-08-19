@@ -2,7 +2,7 @@
 import os
 import random
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any, List, Tuple
 
 import gymnasium as gym
@@ -544,7 +544,7 @@ def main(cfg):
             project=cfg.wandb_project_name,
             entity=cfg.wandb_entity,
             sync_tensorboard=True,
-            config=vars(cfg),
+            config=asdict(cfg),
             name=run_name,
             monitor_gym=True,
             save_code=True,
