@@ -94,7 +94,7 @@ class AgentConfig:
 
 @dataclass
 class TrainConfig:
-    exp_name: str = os.path.basename(__file__)[: -len(".py")]
+    run_name: str = os.path.basename(__file__)[: -len(".py")]
     """the name of this experiment"""
     seed: int = 1
     """seed of the experiment"""
@@ -544,7 +544,6 @@ def main(cfg):
     print(f"  Record video: {cfg.capture_video}")
     print(f"  Device: {device}")
 
-    run_name = f"{cfg.env_id}__{cfg.exp_name}__{cfg.seed}__{int(time.time())}"
     if cfg.track:
         import wandb
 
@@ -556,12 +555,12 @@ def main(cfg):
             entity=cfg.wandb_entity,
             sync_tensorboard=True,
             config=asdict(cfg),
-            name=run_name,
+            name=cfg.run_name,
             monitor_gym=True,
             save_code=True,
         )
         # print_success(f"Wandb run: {wandb_run.name}")
-    writer = SummaryWriter(f"runs/{run_name}")
+    writer = SummaryWriter(f"runs/{cfg.run_name}")
     writer.add_text(
         "hyperparameters",
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(cfg).items()])),
@@ -575,7 +574,7 @@ def main(cfg):
 
     # Create environment
     # print_section("Creating Environment")
-    envs = gym.vector.SyncVectorEnv([make_env(cfg.env_id, cfg.seed, 0, cfg.capture_video, run_name)])
+    envs = gym.vector.SyncVectorEnv([make_env(cfg.env_id, cfg.seed, 0, cfg.capture_video, cfg.run_name)])
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
     # Create agent
