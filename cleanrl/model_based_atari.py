@@ -81,6 +81,11 @@ class AgentConfig:
     consistency_loss: str = "mse"  # "cross-entropy", "mse", "cosine"
     """Which loss function to use for consistency loss?"""
 
+    use_tar_enc: bool = False
+    enc_tau: float = 0.99
+    """Encoder's target smoothing coefficient"""
+
+    use_predictor: bool = False
     use_projection: bool = False
     """If true, calculate the loss in a projected space"""
     use_horizon_as_negatives: bool = False
@@ -198,6 +203,18 @@ class WorldModel(nn.Module):
         self._reward = mlp(self.cfg.latent_dim + act_dim, cfg.mlp_dims, 1)
         if cfg.use_projection:
             self._proj = mlp(self.cfg.latent_dim, cfg.mlp_dims, self.cfg.latent_dim)
+        if cfg.use_predictor:
+            self._predictor = mlp(self.cfg.latent_dim, cfg.mlp_dims, self.cfg.latent_dim)
+
+        # Create target networks
+        if cfg.use_tar_enc:
+            self._target_encoder = copy.deepcopy(self._encoder)
+            for p in self._target_encoder.parameters():
+                p.requires_grad = False
+            if cfg.use_projection:
+                self._target_proj = copy.deepcopy(self._proj)
+                for p in self._target_proj.parameters():
+                    p.requires_grad = False
 
         if cfg.compile:
             self._encoder = torch.compile(self._encoder, mode="default")
@@ -228,8 +245,8 @@ class WorldModel(nn.Module):
 
         return zs
 
-    def encode(self, obs):
-        enc_fn = self._encoder
+    def encode(self, obs, tar: bool = False):
+        enc_fn = self._target_encoder if tar else self._encoder
         x = obs / 255.0
         if x.ndim == 5:  # [T, B, C, H, W]
             t, b = x.shape[:2]
@@ -245,6 +262,21 @@ class WorldModel(nn.Module):
         else:
             raise ValueError(f"Unexpected obs shape {obs.shape}")
         return z
+
+    @torch.no_grad()
+    def _update_target(self):
+        if self.cfg.use_tar_enc:
+            for p, pt in zip(self._encoder.parameters(), self._target_encoder.parameters()):
+                pt.data.lerp_(p.data, 1 - self.cfg.enc_tau)
+            if self.cfg.use_projection:
+                for p, pt in zip(self._proj.parameters(), self._target_proj.parameters()):
+                    pt.data.lerp_(p.data, 1 - self.cfg.enc_tau)
+
+    def project(self, z, tar: bool = False) -> torch.Tensor:
+        if tar and self.cfg.use_tar_enc:
+            return self._target_proj(z)
+        else:
+            return self._proj(z)
 
     def trans(self, z, a) -> torch.Tensor:
         za = torch.concat([z, a], -1)
@@ -372,6 +404,7 @@ class Agent:
         self.model_optimizer.zero_grad()
         loss.backward()
         self.model_optimizer.step()
+        self.model._update_target()
         return info, zs
 
     def critic_update_step(self, batch: ReplayBufferLatentTrajSamples, global_step: int) -> dict[str, Any]:
@@ -394,7 +427,7 @@ class Agent:
 
         # encode targets
         with torch.no_grad():
-            z_tar = self.model.encode(batch.next_observations.to(device))
+            z_tar = self.model.encode(batch.next_observations.to(device), tar=True)
 
         # rollout in latent space
         z0 = self.model.encode(batch.observations[0].to(device))  # [T,B,...]
@@ -416,8 +449,10 @@ class Agent:
 
         # calculate the temporal consistency loss in projected space
         if self.cfg.use_projection:
-            zs_proj = self.model._proj(zs)
-            z_tar_proj = self.model._proj(z_tar)
+            zs_proj = self.model.project(zs)
+            z_tar_proj = self.model.project(z_tar, tar=True)
+            if self.cfg.use_predictor:
+                zs_proj = self.model._predictor(zs_proj)
         else:
             zs_proj = zs
             z_tar_proj = z_tar
