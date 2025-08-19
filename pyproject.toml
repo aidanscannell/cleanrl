@@ -26,6 +26,8 @@ dependencies = [
     "termcolor>=2.0",
     "nvitop",
     "tensordict",
+    "info-nce-pytorch",
+    "einops",
 ]
 
 [project.optional-dependencies]

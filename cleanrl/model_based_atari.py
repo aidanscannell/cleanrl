@@ -12,6 +12,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import tyro
+from einops import einsum, rearrange
+from info_nce import InfoNCE, info_nce
 from tensordict import TensorDict
 from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
@@ -78,6 +80,8 @@ class AgentConfig:
     """Discount factor for representation learning"""
     consistency_loss: str = "mse"  # "cross-entropy", "mse", "cosine"
     """Which loss function to use for consistency loss?"""
+
+    use_horizon_as_negatives: bool = False
 
     use_delta: bool = False
     """Predict change in latent or next latent? i.e. next_z = z + f(z, a) else next_z = f(z, a)"""
@@ -392,12 +396,29 @@ class Agent:
         if self.cfg.consistency_loss == "mse":
             # temporal consistency (MSE)
             tc = ((zs[1:] - z_tar) ** 2).mean(dim=-1)  # [T,B]
+            tc_loss = (rho[:, None] * ((1.0 - dones) * tc).mean(dim=1)).mean()
         elif self.cfg.consistency_loss == "cosine":
             # temporal consistency (cosine similarity)
             tc = -nn.CosineSimilarity(dim=-1, eps=1e-6)(zs[1:], z_tar)
+            tc_loss = (rho[:, None] * ((1.0 - dones) * tc).mean(dim=1)).mean()
+        elif self.cfg.consistency_loss == "infonce":
+            # Get zs from encoder at t+1
+            with torch.no_grad():
+                zs_enc = self.model.encode(batch.next_observations)
+
+            # Get zs from dynamics at t+1
+            zs_dyn = zs[1:]
+
+            if self.cfg.use_horizon_as_negatives:
+                zs_enc = rearrange(zs_enc, "h b d -> (h b) d")
+                zs_dyn = rearrange(zs_dyn, "h b d -> (h b) d")
+                tc = InfoNCE()(zs_dyn, zs_enc)
+            else:
+                tc = torch.vmap(InfoNCE())(zs_dyn, zs_enc)
+                # TODO does this need to consider dones?
+            tc_loss = (tc * rho).mean()
         else:
             raise NotImplementedError
-        tc_loss = (rho[:, None] * ((1.0 - dones) * tc).mean(dim=1)).mean()
 
         loss = self.cfg.consistency_coef * tc_loss + self.cfg.reward_coef * reward_loss
 
