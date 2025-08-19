@@ -112,6 +112,8 @@ class TrainConfig:
     capture_video: bool = False
     """whether to capture videos of the agent performances (check out `videos` folder)"""
     eval_frequency: int = 500
+    num_eval_episodes: int = 10
+
     log_frequency: int = 100
     """the frequency of logging metrics"""
     learning_starts: int = 2e4
