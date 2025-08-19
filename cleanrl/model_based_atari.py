@@ -423,11 +423,11 @@ class Agent:
             tc_loss = (rho[:, None] * ((1.0 - dones) * tc).mean(dim=1)).mean()
         elif self.cfg.consistency_loss == "infonce":
             if self.cfg.use_horizon_as_negatives:
-                zs_enc = rearrange(z_tar_proj, "h b d -> (h b) d")
-                zs_dyn = rearrange(zs_proj[1:], "h b d -> (h b) d")
-                tc = InfoNCE()(zs_dyn, zs_enc)
+                zs_enc = rearrange(z_tar_proj, "t b d -> (t b) d")
+                zs_dyn = rearrange(zs_proj[1:], "t b d -> (t b) d")
+                tc = info_nce(zs_dyn, zs_enc)
             else:
-                tc = torch.vmap(InfoNCE())(zs_proj[1:], z_tar_proj)
+                tc = torch.vmap(info_nce)(zs_proj[1:], z_tar_proj)
                 # TODO does this need to consider dones?
             tc_loss = (tc * rho).mean()
         else:
