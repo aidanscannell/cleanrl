@@ -340,11 +340,14 @@ class BaseBuffer(ABC):
         return_trajectories: bool = True,
     ):
         """
-        If n_step is None or 1: behaves like classic 1-step sampling.
-        If n_step >= 2: samples contiguous n_step windows that don't cross episode boundaries.
+        If n_step is None: behaves like classic 1-step sampling.
+        If n_step >= 1: samples contiguous n_step windows that don't cross episode boundaries.
+        # If n_step is None or 1: behaves like classic 1-step sampling.
+        # If n_step >= 2: samples contiguous n_step windows that don't cross episode boundaries.
         When return_trajectories=True, returns stacked sequences; also returns bootstrap next_obs at t+n_step.
         """
-        if n_step is None or n_step == 1:
+        # if n_step is None or n_step == 1:
+        if n_step is None:
             # 1-step fallback (your original behavior)
             upper_bound = self.buffer_size if self.full else self.pos
             batch_inds = np.random.randint(0, upper_bound, size=batch_size)
