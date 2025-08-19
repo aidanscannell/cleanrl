@@ -135,7 +135,8 @@ class TrainConfig:
     buffer_size: int = int(1e6)
     """the replay memory buffer size"""  # smaller than in original paper but evaluation is done only for 100k steps anyway
 
-    agent: AgentConfig = AgentConfig()
+    # agent: AgentConfig = AgentConfig()
+    agent: AgentConfig = field(default_factory=AgentConfig)
 
 
 def make_env(env_id, seed, idx, capture_video, run_name):
