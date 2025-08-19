@@ -288,11 +288,14 @@ class Actor(nn.Module):
         log_pi = torch.log(probs)
         return probs, log_pi
 
-    def get_action(self, z):
+    def get_action(self, z, eval_mode: bool = False):
         logits = self.forward(z)
         probs, log_pi = self._infer_probs(logits)
         policy = Categorical(probs=probs)
-        actions = policy.sample()  # [B]
+        if eval_mode:
+            actions = torch.argmax(probs, dim=-1)
+        else:
+            actions = policy.sample()  # [B]
         return {"actions": actions.long(), "probs": probs, "log_pi": log_pi}
 
 
@@ -524,9 +527,9 @@ class Agent:
             info.update({"alpha_loss": alpha_loss.detach()})
         return actor_loss, info
 
-    def get_action(self, x):
+    def get_action(self, x, eval_mode: bool = False):
         z = self.model.encode(x)
-        return self.actor.get_action(z)
+        return self.actor.get_action(z, eval_mode=eval_mode)
 
 
 # if __name__ == "__main__":
